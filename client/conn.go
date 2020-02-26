@@ -33,6 +33,67 @@ type Conn struct {
 	connectionID uint32
 }
 
+// 测试登录
+func LoginTest(conn *Conn, username, password, dbname string) error {
+	conn.user = username
+	conn.password = password
+	conn.db = dbname
+	if err := conn.handshake(); err != nil {
+		return err
+	}
+	defer conn.Close()
+	return nil
+}
+
+// 自定义连接，加入超时
+func ConnectWithtimout(addr string, timeout time.Duration, options ...func(*Conn)) (*Conn, error) {
+	proto := getNetProto(addr)
+
+	c := new(Conn)
+
+	var err error
+	conn, err := net.DialTimeout(proto, addr, timeout)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	// 超时
+	_ = conn.SetDeadline(time.Now().Add(timeout))
+	// 发送超时
+	_ = conn.SetWriteDeadline(time.Now().Add(timeout))
+	// 读取超时
+	_ = conn.SetReadDeadline(time.Now().Add(timeout))
+
+	c.Conn = packet.NewConn(conn)
+	c.proto = proto
+
+	// use default charset here, utf-8
+	c.charset = DEFAULT_CHARSET
+
+	// Apply configuration functions.
+	for i := range options {
+		options[i](c)
+	}
+
+	return c, nil
+}
+
+// 握手认证连接
+func (c *Conn) myHandshake() error {
+	var err error
+	if err = c.readInitialHandshake(); err != nil {
+		return errors.Trace(err)
+	}
+	if err := c.writeAuthHandshake(); err != nil {
+		return errors.Trace(err)
+	}
+	if err := c.handleAuthResult(); err != nil {
+		return errors.Trace(err)
+	}
+
+	return nil
+}
+
 func getNetProto(addr string) string {
 	proto := "tcp"
 	if strings.Contains(addr, "/") {
